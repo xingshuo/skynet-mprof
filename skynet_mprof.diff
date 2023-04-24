@@ -1,0 +1,214 @@
+diff --git a/skynet-src/malloc_hook.c b/skynet-src/malloc_hook.c
+index 44c7183..3d79d8e 100644
+--- a/skynet-src/malloc_hook.c
++++ b/skynet-src/malloc_hook.c
+@@ -9,6 +9,44 @@
+ #include "skynet.h"
+ #include "atomic.h"
+ 
++#ifdef MEMORY_PROFILE
++#include <errno.h>
++#include <execinfo.h>
++#include <unistd.h>
++#include "skynet_handle.h"
++#include "skynet_imp.h"
++
++static const int HEADER_LEN = 2;
++
++inline static void
++put_bigendian_u16(uint8_t* buf, uint16_t v) {
++	buf[0] = (uint8_t)(v >> 8);
++	buf[1] = (uint8_t)v;
++}
++
++uint32_t mprof_svc_handle = -1;
++int mprof_notify_fd = -1;
++
++static void
++mprof_block_send(const char* req, int len) {
++	while (true) {
++		int n = write(mprof_notify_fd, req, len);
++		if (n < 0) {
++			if (errno != EINTR) {
++				fprintf(stderr, "mprof: block send error %s.", strerror(errno));
++			}
++			continue;
++		}
++		assert(n == len);
++		return;
++	}
++}
++
++static const int MAX_STACK_SIZE = 32;
++
++static int bt_init_status = 0;
++
++#endif
+ // turn on MEMORY_CHECK can do more memory check, such as double free
+ // #define MEMORY_CHECK
+ 
+@@ -28,6 +66,9 @@ struct mem_cookie {
+ #ifdef MEMORY_CHECK
+ 	uint32_t dogtag;
+ #endif
++#ifdef MEMORY_PROFILE
++	uint32_t sampling;
++#endif
+ };
+ 
+ #define SLOT_SIZE 0x10000
+@@ -85,8 +126,27 @@ update_xmalloc_stat_free(uint32_t handle, size_t __n) {
+ 	}
+ }
+ 
++static void malloc_oom(size_t size) {
++	fprintf(stderr, "xmalloc: Out of memory trying to allocate %zu bytes\n",
++		size);
++	fflush(stderr);
++	abort();
++}
++
++#ifdef MEMORY_PROFILE
++inline static void* fill_prefix(char* ptr, int sampling);
++
+ inline static void*
+-fill_prefix(char* ptr) {
++mprof_malloc(size_t size) {
++	void* buffer = je_malloc(size + PREFIX_SIZE);
++	if(!buffer) malloc_oom(size);
++	buffer = fill_prefix(buffer, 0);
++	return buffer;
++}
++#endif
++
++inline static void*
++fill_prefix(char* ptr, int sampling) {
+ 	uint32_t handle = skynet_current_handle();
+ 	size_t size = je_malloc_usable_size(ptr);
+ 	struct mem_cookie *p = (struct mem_cookie *)(ptr + size - sizeof(struct mem_cookie));
+@@ -94,6 +154,39 @@ fill_prefix(char* ptr) {
+ #ifdef MEMORY_CHECK
+ 	uint32_t dogtag = MEMORY_ALLOCTAG;
+ 	memcpy(&p->dogtag, &dogtag, sizeof(dogtag));
++#endif
++#ifdef MEMORY_PROFILE
++	p->sampling = 0;
++	if (sampling && handle < (uint32_t)(-THREAD_MONITOR) && handle != mprof_svc_handle && mprof_notify_fd >= 0) {
++		void* stack_trace[MAX_STACK_SIZE];
++		if (bt_init_status == 0) { // uninit
++			bt_init_status = 1; // initing
++			backtrace(stack_trace, MAX_STACK_SIZE);
++			bt_init_status = 2; // init done
++		} else if (bt_init_status == 2) {
++			int stack_depth = backtrace(stack_trace, MAX_STACK_SIZE);
++			if (stack_depth > 2) {
++				p->sampling = 1;
++				stack_depth -= 2; // exclude stack_trace[0], stack_trace[1]
++				char* cmd = "malloc ";
++				size_t cmdlen = strlen(cmd);
++				size_t buf_sz = HEADER_LEN + cmdlen + sizeof(ptr) + sizeof(size) + sizeof(stack_depth) + stack_depth * sizeof(void*);
++				void* buffer = mprof_malloc(buf_sz);
++				int offset = HEADER_LEN;
++				memcpy(buffer + offset, cmd, cmdlen);
++				offset += cmdlen;
++				memcpy(buffer + offset, &ptr, sizeof(ptr));
++				offset += sizeof(ptr);
++				memcpy(buffer + offset, &size, sizeof(size));
++				offset += sizeof(size);
++				memcpy(buffer + offset, &stack_depth, sizeof(stack_depth));
++				offset += sizeof(stack_depth);
++				memcpy(buffer + offset, &stack_trace[1], stack_depth * sizeof(void*));
++				put_bigendian_u16(buffer, buf_sz - HEADER_LEN);
++				mprof_block_send(buffer, buf_sz);
++			}
++		}
++	}
+ #endif
+ 	update_xmalloc_stat_alloc(handle, size);
+ 	return ptr;
+@@ -114,18 +207,27 @@ clean_prefix(char* ptr) {
+ 	assert(dogtag == MEMORY_ALLOCTAG);	// memory out of bounds
+ 	dogtag = MEMORY_FREETAG;
+ 	memcpy(&p->dogtag, &dogtag, sizeof(dogtag));
++#endif
++#ifdef MEMORY_PROFILE
++	if (p->sampling && handle < (uint32_t)(-THREAD_MONITOR)) {
++		char* cmd = "free ";
++		size_t cmdlen = strlen(cmd);
++		size_t buf_sz = HEADER_LEN + cmdlen + sizeof(ptr) + sizeof(size);
++		void* buffer = mprof_malloc(buf_sz);
++		int offset = HEADER_LEN;
++		memcpy(buffer + offset, cmd, cmdlen);
++		offset += cmdlen;
++		memcpy(buffer + offset, &ptr, sizeof(ptr));
++		offset += sizeof(ptr);
++		memcpy(buffer + offset, &size, sizeof(size));
++		put_bigendian_u16(buffer, buf_sz - HEADER_LEN);
++		mprof_block_send(buffer, buf_sz);
++	}
+ #endif
+ 	update_xmalloc_stat_free(handle, size);
+ 	return ptr;
+ }
+ 
+-static void malloc_oom(size_t size) {
+-	fprintf(stderr, "xmalloc: Out of memory trying to allocate %zu bytes\n",
+-		size);
+-	fflush(stderr);
+-	abort();
+-}
+-
+ void
+ memory_info_dump(const char* opts) {
+ 	je_malloc_stats_print(0,0, opts);
+@@ -185,7 +287,7 @@ void *
+ skynet_malloc(size_t size) {
+ 	void* ptr = je_malloc(size + PREFIX_SIZE);
+ 	if(!ptr) malloc_oom(size);
+-	return fill_prefix(ptr);
++	return fill_prefix(ptr, 1);
+ }
+ 
+ void *
+@@ -195,7 +297,7 @@ skynet_realloc(void *ptr, size_t size) {
+ 	void* rawptr = clean_prefix(ptr);
+ 	void *newptr = je_realloc(rawptr, size+PREFIX_SIZE);
+ 	if(!newptr) malloc_oom(size);
+-	return fill_prefix(newptr);
++	return fill_prefix(newptr, 1);
+ }
+ 
+ void
+@@ -209,28 +311,28 @@ void *
+ skynet_calloc(size_t nmemb,size_t size) {
+ 	void* ptr = je_calloc(nmemb + ((PREFIX_SIZE+size-1)/size), size );
+ 	if(!ptr) malloc_oom(size);
+-	return fill_prefix(ptr);
++	return fill_prefix(ptr, 1);
+ }
+ 
+ void *
+ skynet_memalign(size_t alignment, size_t size) {
+ 	void* ptr = je_memalign(alignment, size + PREFIX_SIZE);
+ 	if(!ptr) malloc_oom(size);
+-	return fill_prefix(ptr);
++	return fill_prefix(ptr, 1);
+ }
+ 
+ void *
+ skynet_aligned_alloc(size_t alignment, size_t size) {
+ 	void* ptr = je_aligned_alloc(alignment, size + (size_t)((PREFIX_SIZE + alignment -1) & ~(alignment-1)));
+ 	if(!ptr) malloc_oom(size);
+-	return fill_prefix(ptr);
++	return fill_prefix(ptr, 1);
+ }
+ 
+ int
+ skynet_posix_memalign(void **memptr, size_t alignment, size_t size) {
+ 	int err = je_posix_memalign(memptr, alignment, size + PREFIX_SIZE);
+ 	if (err) malloc_oom(size);
+-	fill_prefix(*memptr);
++	fill_prefix(*memptr, 1);
+ 	return err;
+ }
+ 
