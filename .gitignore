@@ -3,6 +3,6 @@ mprof.so
 mprof
 skynet
 *.pro
-*.png
+./*.png
 *.svg
 *.txt
