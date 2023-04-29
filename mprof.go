@@ -20,7 +20,7 @@ const (
 var (
 	input string
 	inuse bool
-	text  bool
+	top   string
 	png   string
 	svg   string
 	info  string
@@ -102,33 +102,68 @@ func parseFile(filename string) (*Profile, error) {
 	return prof, nil
 }
 
-func showText(prof *Profile, inuse bool) {
+func showTop(prof *Profile, inuse bool, sortByFlat bool) {
 	type node struct {
 		Id          uint64
 		alloc_objs  int
 		alloc_bytes int
 	}
 	leafNodes := make(map[uint64]*node)
+	cumNodes := make(map[uint64]*node)
 	totalBytes := 0
 	if inuse {
 		for _, sa := range prof.samples {
-			if sa.alloc_bytes != sa.free_bytes {
-				Id := sa.stack[0]
-				if _, ok := leafNodes[Id]; !ok {
-					leafNodes[Id] = &node{
-						Id:          Id,
+			inuseBytes := sa.alloc_bytes - sa.free_bytes
+			if inuseBytes == 0 {
+				continue
+			}
+			cumRecords := make(map[uint64]bool)
+			for _, id := range sa.stack {
+				if _, ok := cumNodes[id]; !ok {
+					cumNodes[id] = &node{
+						Id:          id,
 						alloc_objs:  0,
 						alloc_bytes: 0,
 					}
 				}
-				leafNodes[Id].alloc_objs += (sa.alloc_objs - sa.free_objs)
-				inuseBytes := sa.alloc_bytes - sa.free_bytes
-				leafNodes[Id].alloc_bytes += inuseBytes
-				totalBytes += inuseBytes
+				if !cumRecords[id] {
+					cumRecords[id] = true
+					cumNodes[id].alloc_bytes += inuseBytes
+					cumNodes[id].alloc_objs += (sa.alloc_objs - sa.free_objs)
+				}
 			}
+
+			Id := sa.stack[0]
+			if _, ok := leafNodes[Id]; !ok {
+				leafNodes[Id] = &node{
+					Id:          Id,
+					alloc_objs:  0,
+					alloc_bytes: 0,
+				}
+			}
+			leafNodes[Id].alloc_bytes += inuseBytes
+			leafNodes[Id].alloc_objs += (sa.alloc_objs - sa.free_objs)
+
+			totalBytes += inuseBytes
 		}
 	} else {
 		for _, sa := range prof.samples {
+			cumRecords := make(map[uint64]bool)
+			for _, id := range sa.stack {
+				if _, ok := cumNodes[id]; !ok {
+					cumNodes[id] = &node{
+						Id:          id,
+						alloc_objs:  0,
+						alloc_bytes: 0,
+					}
+				}
+				if !cumRecords[id] {
+					cumRecords[id] = true
+					cumNodes[id].alloc_bytes += sa.alloc_bytes
+					cumNodes[id].alloc_objs += sa.alloc_objs
+				}
+			}
+
 			Id := sa.stack[0]
 			if _, ok := leafNodes[Id]; !ok {
 				leafNodes[Id] = &node{
@@ -139,36 +174,113 @@ func showText(prof *Profile, inuse bool) {
 			}
 			leafNodes[Id].alloc_bytes += sa.alloc_bytes
 			leafNodes[Id].alloc_objs += sa.alloc_objs
+
 			totalBytes += sa.alloc_bytes
 		}
 	}
+	if totalBytes == 0 {
+		fmt.Println("total bytes is 0")
+		return
+	}
 
 	pairs := make([]*node, 0)
-	for Id, lNode := range leafNodes {
-		pairs = append(pairs, &node{
-			Id:          Id,
-			alloc_objs:  lNode.alloc_objs,
-			alloc_bytes: lNode.alloc_bytes,
+	if sortByFlat {
+		for Id, lNode := range leafNodes {
+			pairs = append(pairs, &node{
+				Id:          Id,
+				alloc_objs:  lNode.alloc_objs,
+				alloc_bytes: lNode.alloc_bytes,
+			})
+		}
+		sort.Slice(pairs, func(i, j int) bool {
+			if pairs[i].alloc_bytes == pairs[j].alloc_bytes {
+				return pairs[i].alloc_objs > pairs[j].alloc_objs
+			}
+			return pairs[i].alloc_bytes > pairs[j].alloc_bytes
+		})
+
+		padding := make([]*node, 0)
+		for Id, cNode := range cumNodes {
+			if _, ok := leafNodes[Id]; !ok {
+				padding = append(padding, &node{
+					Id:          Id,
+					alloc_objs:  cNode.alloc_objs,
+					alloc_bytes: cNode.alloc_bytes,
+				})
+			}
+		}
+		sort.Slice(padding, func(i, j int) bool {
+			if padding[i].alloc_bytes == padding[j].alloc_bytes {
+				return padding[i].alloc_objs > padding[j].alloc_objs
+			}
+			return padding[i].alloc_bytes > padding[j].alloc_bytes
+		})
+		pairs = append(pairs, padding...)
+	} else {
+		for Id, cNode := range cumNodes {
+			pairs = append(pairs, &node{
+				Id:          Id,
+				alloc_objs:  cNode.alloc_objs,
+				alloc_bytes: cNode.alloc_bytes,
+			})
+		}
+		sort.Slice(pairs, func(i, j int) bool {
+			if pairs[i].alloc_bytes == pairs[j].alloc_bytes {
+				return pairs[i].alloc_objs > pairs[j].alloc_objs
+			}
+			return pairs[i].alloc_bytes > pairs[j].alloc_bytes
 		})
 	}
-	sort.Slice(pairs, func(i, j int) bool {
-		if pairs[i].alloc_bytes == pairs[j].alloc_bytes {
-			return pairs[i].alloc_objs > pairs[j].alloc_objs
-		}
-		return pairs[i].alloc_bytes > pairs[j].alloc_bytes
-	})
 
 	if inuse {
 		fmt.Println("-----------inuse space ranking----------")
 	} else {
 		fmt.Println("-----------alloc space ranking----------")
 	}
-	for i, pa := range pairs {
-		s := fmt.Sprintf("%vth\t%v(kb)\t%v%%\t%v\t%v\n", i+1, float64(pa.alloc_bytes)/1024.0, float64(pa.alloc_bytes)*100/float64(totalBytes), pa.alloc_objs, prof.funcId2Name[pa.Id])
-		if i < 5 && pa.alloc_bytes > 0 {
-			s = KRED + s + KNRM
+
+	if sortByFlat {
+		fmt.Println("No:\t Flat:\t Flat%:\t FlatObjs:\t Cum:\t Cum%:\t CumObjs:\t FuncName:")
+		for i, pa := range pairs {
+			s := ""
+			if leafNodes[pa.Id] != nil {
+				s = fmt.Sprintf("%vth\t %.2f(kb)\t %.2f%%\t %v\t %.2f(kb)\t %.2f%%\t %v\t %v\n",
+					i+1,
+					float64(pa.alloc_bytes)/1024.0, float64(pa.alloc_bytes)*100/float64(totalBytes), pa.alloc_objs,
+					float64(cumNodes[pa.Id].alloc_bytes)/1024.0, float64(cumNodes[pa.Id].alloc_bytes)*100/float64(totalBytes), cumNodes[pa.Id].alloc_objs,
+					prof.funcId2Name[pa.Id])
+			} else {
+				s = fmt.Sprintf("%vth\t 0(kb)\t 0%%\t 0\t %.2f(kb)\t %.2f%%\t %v\t %v\n",
+					i+1,
+					float64(pa.alloc_bytes)/1024.0, float64(pa.alloc_bytes)*100/float64(totalBytes), pa.alloc_objs,
+					prof.funcId2Name[pa.Id])
+			}
+
+			if i < 5 {
+				s = KRED + s + KNRM
+			}
+			fmt.Print(s)
 		}
-		fmt.Print(s)
+	} else {
+		fmt.Println("No:\t Cum:\t Cum%:\t CumObjs:\t Flat:\t Flat%:\t FlatObjs:\t FuncName:")
+		for i, pa := range pairs {
+			if leafNodes[pa.Id] == nil {
+				leafNodes[pa.Id] = &node{
+					Id:          pa.Id,
+					alloc_objs:  0,
+					alloc_bytes: 0,
+				}
+			}
+			s := fmt.Sprintf("%vth\t %.2f(kb)\t %.2f%%\t %v\t %.2f(kb)\t %.2f%%\t %v\t %v\n",
+				i+1,
+				float64(pa.alloc_bytes)/1024.0, float64(pa.alloc_bytes)*100/float64(totalBytes), pa.alloc_objs,
+				float64(leafNodes[pa.Id].alloc_bytes)/1024.0, float64(leafNodes[pa.Id].alloc_bytes)*100/float64(totalBytes), leafNodes[pa.Id].alloc_objs,
+				prof.funcId2Name[pa.Id])
+
+			if i < 5 {
+				s = KRED + s + KNRM
+			}
+			fmt.Print(s)
+		}
 	}
 }
 
@@ -317,23 +429,23 @@ func showInfo(prof *Profile, outFile string) {
 		return pairs[i].Id < pairs[j].Id
 	})
 	var builder strings.Builder
-	builder.WriteString("FuncId\t:\tFuncName\n")
+	builder.WriteString("----------FuncName:------------\n")
 	for _, pa := range pairs {
-		builder.WriteString(fmt.Sprintf("%d\t:\t%s\n", pa.Id, pa.name))
+		builder.WriteString(fmt.Sprintf("%s\n", pa.name))
 	}
 	builder.WriteString("--------------------------------------------------------------------\n")
 
 	sort.Slice(prof.samples, func(i, j int) bool {
 		return (prof.samples[i].alloc_bytes - prof.samples[i].free_bytes) > (prof.samples[j].alloc_bytes - prof.samples[j].free_bytes)
 	})
-	builder.WriteString("AllocBytes\tFreeBytes\tAllocObjs\tFreeObjs\t:\tBacktrace\n")
+	builder.WriteString("AllocBytes:\tFreeBytes:\tAllocObjs:\tFreeObjs:\tBacktrace:\n")
 	for _, sa := range prof.samples {
-		builder.WriteString(fmt.Sprintf("%d\t%d\t%d\t%d\t:\t", sa.alloc_bytes, sa.free_bytes, sa.alloc_objs, sa.free_objs))
+		builder.WriteString(fmt.Sprintf("%-10d\t%-9d\t%-9d\t%-8d\t", sa.alloc_bytes, sa.free_bytes, sa.alloc_objs, sa.free_objs))
 		for i := sa.depth - 1; i >= 0; i-- {
 			if i == 0 {
-				builder.WriteString(fmt.Sprintf("%d\n", sa.stack[i]))
+				builder.WriteString(fmt.Sprintf("0x%x\n", sa.stack[i]))
 			} else {
-				builder.WriteString(fmt.Sprintf("%d -> ", sa.stack[i]))
+				builder.WriteString(fmt.Sprintf("0x%x -> ", sa.stack[i]))
 			}
 		}
 	}
@@ -345,10 +457,10 @@ func showInfo(prof *Profile, outFile string) {
 
 func main() {
 	flag.StringVar(&input, "i", "", "input file")
-	flag.BoolVar(&text, "text", false, "show text sort data")
-	flag.BoolVar(&inuse, "inuse", false, "show inuse space data")
-	flag.StringVar(&png, "png", "", "generate png file")
-	flag.StringVar(&svg, "svg", "", "generate svg file")
+	flag.StringVar(&top, "top", "", "show `flat` or `cum` top sort data, default `flat`")
+	flag.BoolVar(&inuse, "inuse", true, "show `inuse` or `alloc` space data, default `inuse`")
+	flag.StringVar(&png, "png", "", "generate call relationship png pic")
+	flag.StringVar(&svg, "svg", "", "generate call relationship svg pic")
 	flag.StringVar(&info, "info", "", "dump mem profile data detail info to file")
 	flag.Parse()
 
@@ -361,8 +473,8 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	if text {
-		showText(prof, inuse)
+	if top != "" {
+		showTop(prof, inuse, top == "flat")
 	}
 	if png != "" || svg != "" {
 		showPic(prof, inuse, png, svg)
