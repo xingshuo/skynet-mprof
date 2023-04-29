@@ -14,6 +14,7 @@ skynet cmem内存占用统计工具
 ## 编译 && 运行示例
 * 在本地skynet代码仓库根目录执行:git apply [skynet_mprof.diff](https://github.com/xingshuo/skynet-mprof/blob/main/skynet_mprof.diff#L1)，并重新编译skynet
 ```bash
+# make cleanall
 # make linux SKYNET_DEFINES=-DMEMORY_PROFILE
 ```
 * 将编译后的skynet仓库连接到工程目录下
