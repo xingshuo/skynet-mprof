@@ -239,20 +239,30 @@ func showTop(prof *Profile, inuse bool, sortByFlat bool) {
 	}
 
 	if sortByFlat {
-		fmt.Println("No:\t Flat:\t Flat%:\t FlatObjs:\t Cum:\t Cum%:\t CumObjs:\t FuncName:")
+		fmt.Printf("%-10s%-10s%-10s%-10s%-10s%-10s%-10s%-10s\n", 
+			"No:", "Flat(kb):", "Flat%:", "FlatObjs:", "Cum(kb):", "Cum%:", "CumObjs:", "FuncName:")
 		for i, pa := range pairs {
 			s := ""
 			if leafNodes[pa.Id] != nil {
-				s = fmt.Sprintf("%vth\t %.2f(kb)\t %.2f%%\t %v\t %.2f(kb)\t %.2f%%\t %v\t %v\n",
-					i+1,
-					float64(pa.alloc_bytes)/1024.0, float64(pa.alloc_bytes)*100/float64(totalBytes), pa.alloc_objs,
-					float64(cumNodes[pa.Id].alloc_bytes)/1024.0, float64(cumNodes[pa.Id].alloc_bytes)*100/float64(totalBytes), cumNodes[pa.Id].alloc_objs,
-					prof.funcId2Name[pa.Id])
+				s = fmt.Sprintf("%-10s%-10s%-10s%-10d%-10s%-10s%-10d%-10s\n",
+						fmt.Sprintf("%dth", i+1),
+						fmt.Sprintf("%.2f", float64(pa.alloc_bytes)/1024.0), 
+						fmt.Sprintf("%.2f%%", float64(pa.alloc_bytes)*100/float64(totalBytes)),
+						pa.alloc_objs,
+						fmt.Sprintf("%.2f", float64(cumNodes[pa.Id].alloc_bytes)/1024.0), 
+						fmt.Sprintf("%.2f%%", float64(cumNodes[pa.Id].alloc_bytes)*100/float64(totalBytes)),
+						cumNodes[pa.Id].alloc_objs,
+						prof.funcId2Name[pa.Id])
 			} else {
-				s = fmt.Sprintf("%vth\t 0(kb)\t 0%%\t 0\t %.2f(kb)\t %.2f%%\t %v\t %v\n",
-					i+1,
-					float64(pa.alloc_bytes)/1024.0, float64(pa.alloc_bytes)*100/float64(totalBytes), pa.alloc_objs,
-					prof.funcId2Name[pa.Id])
+				s = fmt.Sprintf("%-10s%-10d%-10d%-10d%-10s%-10s%-10d%-10s\n",
+						fmt.Sprintf("%dth", i+1),
+						0,
+						0,
+						0,
+						fmt.Sprintf("%.2f", float64(pa.alloc_bytes)/1024.0), 
+						fmt.Sprintf("%.2f%%", float64(pa.alloc_bytes)*100/float64(totalBytes)),
+						pa.alloc_objs,
+						prof.funcId2Name[pa.Id])
 			}
 
 			if i < 5 {
@@ -261,7 +271,8 @@ func showTop(prof *Profile, inuse bool, sortByFlat bool) {
 			fmt.Print(s)
 		}
 	} else {
-		fmt.Println("No:\t Cum:\t Cum%:\t CumObjs:\t Flat:\t Flat%:\t FlatObjs:\t FuncName:")
+		fmt.Printf("%-10s%-10s%-10s%-10s%-10s%-10s%-10s%-10s\n", 
+			"No:", "Cum(kb):", "Cum%:", "CumObjs:", "Flat(kb):", "Flat%:", "FlatObjs:", "FuncName:")
 		for i, pa := range pairs {
 			if leafNodes[pa.Id] == nil {
 				leafNodes[pa.Id] = &node{
@@ -270,11 +281,15 @@ func showTop(prof *Profile, inuse bool, sortByFlat bool) {
 					alloc_bytes: 0,
 				}
 			}
-			s := fmt.Sprintf("%vth\t %.2f(kb)\t %.2f%%\t %v\t %.2f(kb)\t %.2f%%\t %v\t %v\n",
-				i+1,
-				float64(pa.alloc_bytes)/1024.0, float64(pa.alloc_bytes)*100/float64(totalBytes), pa.alloc_objs,
-				float64(leafNodes[pa.Id].alloc_bytes)/1024.0, float64(leafNodes[pa.Id].alloc_bytes)*100/float64(totalBytes), leafNodes[pa.Id].alloc_objs,
-				prof.funcId2Name[pa.Id])
+			s := fmt.Sprintf("%-10s%-10s%-10s%-10d%-10s%-10s%-10d%-10s\n",
+					fmt.Sprintf("%dth", i+1),
+					fmt.Sprintf("%.2f", float64(pa.alloc_bytes)/1024.0),
+					fmt.Sprintf("%.2f%%", float64(pa.alloc_bytes)*100/float64(totalBytes)),
+					pa.alloc_objs,
+					fmt.Sprintf("%.2f", float64(leafNodes[pa.Id].alloc_bytes)/1024.0),
+					fmt.Sprintf("%.2f%%", float64(leafNodes[pa.Id].alloc_bytes)*100/float64(totalBytes)),
+					leafNodes[pa.Id].alloc_objs,
+					prof.funcId2Name[pa.Id])
 
 			if i < 5 {
 				s = KRED + s + KNRM
