@@ -1,5 +1,5 @@
 diff --git a/skynet-src/malloc_hook.c b/skynet-src/malloc_hook.c
-index 44c7183..3d79d8e 100644
+index 44c7183..c29c3f6 100644
 --- a/skynet-src/malloc_hook.c
 +++ b/skynet-src/malloc_hook.c
 @@ -9,6 +9,44 @@
@@ -132,7 +132,7 @@ index 44c7183..3d79d8e 100644
  	memcpy(&p->dogtag, &dogtag, sizeof(dogtag));
 +#endif
 +#ifdef MEMORY_PROFILE
-+	if (p->sampling && handle < (uint32_t)(-THREAD_MONITOR)) {
++	if (p->sampling) {
 +		char* cmd = "free ";
 +		size_t cmdlen = strlen(cmd);
 +		size_t buf_sz = HEADER_LEN + cmdlen + sizeof(ptr) + sizeof(size);
