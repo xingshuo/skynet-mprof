@@ -44,6 +44,9 @@ end
 function MSG.error(fd, msg)
 end
 
+function MSG.init(fd, msg)
+end
+
 Skynet.register_protocol {
     name = "socket",
     id = Skynet.PTYPE_SOCKET,   -- PTYPE_SOCKET = 6
