@@ -46,7 +46,7 @@ class mprof_app {
 public:
     mprof_app();
     ~mprof_app();
-    void init_pipe();
+    int init_pipe(skynet_context* ctx);
 
     void handle_cmd(const char* msg, int sz);
     void handle_socket_msg(const struct skynet_socket_message* message);
@@ -54,7 +54,7 @@ public:
     void build_func_symbol_table();
     void dump_mem_records(char* filename);
 
-public:
+private:
     struct bucket* m_buckhash[BUCK_HASH_SIZE];
     struct bucket* m_bucklist;
     std::unordered_map<std::string, void*> m_func_name2Id;
@@ -66,4 +66,5 @@ public:
     int m_records_num;
     int m_bucks_num;
     int m_socketId;
+    int m_pipe_rd;
 };

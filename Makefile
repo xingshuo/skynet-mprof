@@ -1,6 +1,6 @@
 
 CXX = g++
-CFLAGS = -g -Wall -std=c++11 -DNDEBUG -O1 -rdynamic
+CFLAGS = -g -Wall -std=c++11 -O1 -rdynamic
 SHARED = -fPIC --shared
 INCLUDE_DIR ?= skynet/skynet-src
 TARGET = mprof.so

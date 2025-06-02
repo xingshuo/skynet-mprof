@@ -6,3 +6,4 @@ skynet
 ./*.png
 *.svg
 *.txt
+.vscode/

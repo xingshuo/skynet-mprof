@@ -11,6 +11,7 @@ mprof_app::mprof_app() {
     m_bucks_num = 0;
     m_bucklist = NULL;
     m_socketId = -1;
+    m_pipe_rd = -1;
 }
 
 mprof_app::~mprof_app() {
@@ -20,25 +21,45 @@ mprof_app::~mprof_app() {
         pcurr = pcurr->allnext;
         free(tmp);
     }
+    if (m_socketId >= 0) {
+        skynet_socket_close(m_ctx, m_socketId);
+        m_socketId = -1;
+    }
+    if (m_pipe_rd >= 0) {
+        close(m_pipe_rd);
+        m_pipe_rd = -1;
+    }
+    int pipe_wr = mprof_notify_fd;
+    if (pipe_wr >= 0) {
+        // TODO: 优雅关闭pipe_wr
+    }
 }
 
-void mprof_app::init_pipe() {
+int mprof_app::init_pipe(skynet_context* ctx) {
     int temp[2];
     if (pipe(temp)) {
-        skynet_error(m_ctx, "mprof: pipe create failed");
-        return;
+        skynet_error(ctx, "mprof: pipe create failed");
+        return -1;
     }
+    // bind read fd to skynet socket poll
+    int socket_id = skynet_socket_bind(ctx, temp[0]);
+    if (socket_id < 0) {
+        skynet_error(ctx, "mprof: skynet socket bind pipe read fd failed");
+        return -2;
+    }
+    m_socketId = socket_id;
+    // set read fd
+    m_pipe_rd = temp[0];
     // set write fd
     mprof_notify_fd = temp[1];
-    // bind read fd to skynet socket poll
-    m_socketId = skynet_socket_bind(m_ctx, temp[0]);
-    assert(m_socketId >= 0);
+    m_ctx = ctx;
+    return 0;
 }
 
 static inline int
 read_size(const uint8_t * buffer) {
-	int r = (int)buffer[0] << 8 | (int)buffer[1];
-	return r;
+    int r = (int)buffer[0] << 8 | (int)buffer[1];
+    return r;
 }
 
 void mprof_app::handle_socket_msg(const struct skynet_socket_message* message) {
@@ -57,10 +78,10 @@ void mprof_app::handle_socket_msg(const struct skynet_socket_message* message) {
             if ((int)m_recv_buf.length() < pkg_len + HEADER_LEN) {
                 break;
             }
-            std::string data = m_recv_buf.substr(HEADER_LEN, pkg_len);
-            m_recv_buf = m_recv_buf.substr(pkg_len + HEADER_LEN);
-            handle_cmd(data.c_str(), data.length());
+            handle_cmd(rbuf + HEADER_LEN, pkg_len);
+            m_recv_buf.erase(0, HEADER_LEN + pkg_len);
         }
+        skynet_free(message->buffer);
         break;
     }
     }
@@ -293,7 +314,8 @@ void mprof_app::dump_mem_records(char* filename) {
 
     write_file(fd, (const char*)buf, total_len);
     close(fd);
-    skynet_error(m_ctx, "mprof: save %d records, %d buckets, %d nodes to %s", m_records_num, m_bucks_num, func_num, filename);
+    free(buf);
+    skynet_error(m_ctx, "mprof: save %d records, %d buckets, %d nodes to <%s>", m_records_num, m_bucks_num, func_num, filename);
 }
 
 void mprof_app::build_func_symbol_table() {
@@ -328,7 +350,7 @@ void mprof_app::build_func_symbol_table() {
     }
 }
 
-extern "C" int
+static int
 _cb(struct skynet_context * ctx, void * ud, int type, int session, uint32_t source, const void * msg, size_t sz) {
     mprof_app* app = (mprof_app*)ud;
     switch(type) {
@@ -356,8 +378,10 @@ mprof_release(mprof_app* app) {
 extern "C" int
 mprof_init(mprof_app* app, struct skynet_context* ctx, char* parm) {
     mprof_svc_handle = skynet_context_handle(ctx);
-    app->m_ctx = ctx;
-    app->init_pipe();
+    int ret = app->init_pipe(ctx);
+    if (ret) {
+        return ret;
+    }
     skynet_callback(ctx, app, _cb);
     skynet_error(ctx, "mprof: service init done");
     return 0;
