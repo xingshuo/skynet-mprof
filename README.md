@@ -120,6 +120,7 @@ AllocBytes:	FreeBytes:	AllocObjs:	FreeObjs:	Backtrace:
 * https://github.com/golang/go/blob/master/src/runtime/mprof.go
 * https://github.com/google/pprof
 
-## 其他配套工具
+## 其他扩展库
+* https://github.com/xingshuo/skynet-ext
 * https://github.com/xingshuo/skynet-perf
 * https://github.com/xingshuo/skynet-observer
