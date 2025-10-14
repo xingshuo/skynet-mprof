@@ -27,7 +27,7 @@ skynet cmem内存占用统计工具
 ```
 * 编译解析器mprof
 ```bash
-# go get github.com/goccy/go-graphviz
+# go get github.com/goccy/go-graphviz@v0.1.3
 # go build mprof.go
 ```
 * 运行测试用例
@@ -78,6 +78,15 @@ lfilter
 /home/ubuntu/Repo/github/skynet-mprof/skynet/lualib-src/lua-netpack.c:355
 ```
 结合具体应用场景，可分析出是这2处代码其上一行的skynet_malloc分配的内存，在test_gate服务处理完消息后，没有被释放导致了内存泄漏
+
+* 生成内存分配调用链及分配字节数占比火焰图信息
+```bash
+# ./mprof -i test_mem.pro -flame test_mem.flame
+# perl flamegraph.pl --title "Mem Flame Graph" --countname "samples" test_mem.flame > test_mem_flame.svg
+```
+输出示例：
+![火焰图](test/test_mem.svg)
+
 * 生成函数间调用关系及内存分配信息的png/svg图片
 ```bash
 # ./mprof -i test_mem.pro -png test_mem.png
@@ -85,6 +94,7 @@ lfilter
 ```
 输出示例：
 ![image](test/test_mem.png)
+
 * 生成采样文件的源信息明细（通常用于调试）
 ```bash
 # ./mprof -i test_mem.pro -info test_mem.txt

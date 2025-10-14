@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+
 	"github.com/goccy/go-graphviz"
 )
 
@@ -24,6 +25,7 @@ var (
 	png   string
 	svg   string
 	info  string
+	flame string
 )
 
 type Sample struct {
@@ -239,30 +241,34 @@ func showTop(prof *Profile, inuse bool, sortByFlat bool) {
 	}
 
 	if sortByFlat {
-		fmt.Printf("%-10s%-10s%-10s%-10s%-10s%-10s%-10s%-10s\n", 
+		fmt.Printf("%-10s%-10s%-10s%-10s%-10s%-10s%-10s%-10s\n",
 			"No:", "Flat(kb):", "Flat%:", "FlatObjs:", "Cum(kb):", "Cum%:", "CumObjs:", "FuncName:")
 		for i, pa := range pairs {
 			s := ""
+			fname := prof.funcId2Name[pa.Id]
+			if fname == "" {
+				fname = fmt.Sprintf("0x%x", pa.Id)
+			}
 			if leafNodes[pa.Id] != nil {
 				s = fmt.Sprintf("%-10s%-10s%-10s%-10d%-10s%-10s%-10d%-10s\n",
-						fmt.Sprintf("%dth", i+1),
-						fmt.Sprintf("%.2f", float64(pa.alloc_bytes)/1024.0), 
-						fmt.Sprintf("%.2f%%", float64(pa.alloc_bytes)*100/float64(totalBytes)),
-						pa.alloc_objs,
-						fmt.Sprintf("%.2f", float64(cumNodes[pa.Id].alloc_bytes)/1024.0), 
-						fmt.Sprintf("%.2f%%", float64(cumNodes[pa.Id].alloc_bytes)*100/float64(totalBytes)),
-						cumNodes[pa.Id].alloc_objs,
-						prof.funcId2Name[pa.Id])
+					fmt.Sprintf("%dth", i+1),
+					fmt.Sprintf("%.2f", float64(pa.alloc_bytes)/1024.0),
+					fmt.Sprintf("%.2f%%", float64(pa.alloc_bytes)*100/float64(totalBytes)),
+					pa.alloc_objs,
+					fmt.Sprintf("%.2f", float64(cumNodes[pa.Id].alloc_bytes)/1024.0),
+					fmt.Sprintf("%.2f%%", float64(cumNodes[pa.Id].alloc_bytes)*100/float64(totalBytes)),
+					cumNodes[pa.Id].alloc_objs,
+					fname)
 			} else {
 				s = fmt.Sprintf("%-10s%-10d%-10d%-10d%-10s%-10s%-10d%-10s\n",
-						fmt.Sprintf("%dth", i+1),
-						0,
-						0,
-						0,
-						fmt.Sprintf("%.2f", float64(pa.alloc_bytes)/1024.0), 
-						fmt.Sprintf("%.2f%%", float64(pa.alloc_bytes)*100/float64(totalBytes)),
-						pa.alloc_objs,
-						prof.funcId2Name[pa.Id])
+					fmt.Sprintf("%dth", i+1),
+					0,
+					0,
+					0,
+					fmt.Sprintf("%.2f", float64(pa.alloc_bytes)/1024.0),
+					fmt.Sprintf("%.2f%%", float64(pa.alloc_bytes)*100/float64(totalBytes)),
+					pa.alloc_objs,
+					fname)
 			}
 
 			if i < 5 {
@@ -271,7 +277,7 @@ func showTop(prof *Profile, inuse bool, sortByFlat bool) {
 			fmt.Print(s)
 		}
 	} else {
-		fmt.Printf("%-10s%-10s%-10s%-10s%-10s%-10s%-10s%-10s\n", 
+		fmt.Printf("%-10s%-10s%-10s%-10s%-10s%-10s%-10s%-10s\n",
 			"No:", "Cum(kb):", "Cum%:", "CumObjs:", "Flat(kb):", "Flat%:", "FlatObjs:", "FuncName:")
 		for i, pa := range pairs {
 			if leafNodes[pa.Id] == nil {
@@ -282,14 +288,14 @@ func showTop(prof *Profile, inuse bool, sortByFlat bool) {
 				}
 			}
 			s := fmt.Sprintf("%-10s%-10s%-10s%-10d%-10s%-10s%-10d%-10s\n",
-					fmt.Sprintf("%dth", i+1),
-					fmt.Sprintf("%.2f", float64(pa.alloc_bytes)/1024.0),
-					fmt.Sprintf("%.2f%%", float64(pa.alloc_bytes)*100/float64(totalBytes)),
-					pa.alloc_objs,
-					fmt.Sprintf("%.2f", float64(leafNodes[pa.Id].alloc_bytes)/1024.0),
-					fmt.Sprintf("%.2f%%", float64(leafNodes[pa.Id].alloc_bytes)*100/float64(totalBytes)),
-					leafNodes[pa.Id].alloc_objs,
-					prof.funcId2Name[pa.Id])
+				fmt.Sprintf("%dth", i+1),
+				fmt.Sprintf("%.2f", float64(pa.alloc_bytes)/1024.0),
+				fmt.Sprintf("%.2f%%", float64(pa.alloc_bytes)*100/float64(totalBytes)),
+				pa.alloc_objs,
+				fmt.Sprintf("%.2f", float64(leafNodes[pa.Id].alloc_bytes)/1024.0),
+				fmt.Sprintf("%.2f%%", float64(leafNodes[pa.Id].alloc_bytes)*100/float64(totalBytes)),
+				leafNodes[pa.Id].alloc_objs,
+				prof.funcId2Name[pa.Id])
 
 			if i < 5 {
 				s = KRED + s + KNRM
@@ -446,7 +452,7 @@ func showInfo(prof *Profile, outFile string) {
 	var builder strings.Builder
 	builder.WriteString("----------FuncName:------------\n")
 	for _, pa := range pairs {
-		builder.WriteString(fmt.Sprintf("%s\n", pa.name))
+		builder.WriteString(fmt.Sprintf("0x%x\t%s\n", pa.Id, pa.name))
 	}
 	builder.WriteString("--------------------------------------------------------------------\n")
 
@@ -470,6 +476,38 @@ func showInfo(prof *Profile, outFile string) {
 	}
 }
 
+func showFlameGraph(prof *Profile, inuse bool, outFile string) {
+	var builder strings.Builder
+	if inuse {
+		for _, sa := range prof.samples {
+			for i := sa.depth - 1; i >= 0; i-- {
+				Id := sa.stack[i]
+				if i == 0 {
+					builder.WriteString(fmt.Sprintf("%s ", prof.funcId2Name[Id]))
+				} else {
+					builder.WriteString(fmt.Sprintf("%s;", prof.funcId2Name[Id]))
+				}
+			}
+			builder.WriteString(fmt.Sprintf("%d\n", sa.alloc_bytes-sa.free_bytes))
+		}
+	} else {
+		for _, sa := range prof.samples {
+			for i := sa.depth - 1; i >= 0; i-- {
+				Id := sa.stack[i]
+				if i == 0 {
+					builder.WriteString(fmt.Sprintf("%s ", prof.funcId2Name[Id]))
+				} else {
+					builder.WriteString(fmt.Sprintf("%s;", prof.funcId2Name[Id]))
+				}
+			}
+			builder.WriteString(fmt.Sprintf("%d\n", sa.alloc_bytes))
+		}
+	}
+	if err := os.WriteFile(outFile, []byte(builder.String()), 0666); err != nil {
+		fmt.Println(err)
+	}
+}
+
 func main() {
 	flag.StringVar(&input, "i", "", "input file")
 	flag.StringVar(&top, "top", "", "show `flat` or `cum` top sort data, default `flat`")
@@ -477,6 +515,7 @@ func main() {
 	flag.StringVar(&png, "png", "", "generate call relationship png pic")
 	flag.StringVar(&svg, "svg", "", "generate call relationship svg pic")
 	flag.StringVar(&info, "info", "", "dump mem profile data detail info to file")
+	flag.StringVar(&flame, "flame", "", "generate flame graph file")
 	flag.Parse()
 
 	if input == "" {
@@ -496,5 +535,8 @@ func main() {
 	}
 	if info != "" {
 		showInfo(prof, info)
+	}
+	if flame != "" {
+		showFlameGraph(prof, inuse, flame)
 	}
 }

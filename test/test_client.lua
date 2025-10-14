@@ -20,7 +20,7 @@ Skynet.start(function()
 
     Skynet.timeout(300, function()
         local count = 0
-        local maxCount = 60
+        local maxCount = 30
         while count < maxCount do
             count = count + 1
             local msgSz = math.random(50, 100)

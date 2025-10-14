@@ -1,5 +1,5 @@
 diff --git a/skynet-src/malloc_hook.c b/skynet-src/malloc_hook.c
-index 44c7183..c29c3f6 100644
+index 44c7183..0c6b895 100644
 --- a/skynet-src/malloc_hook.c
 +++ b/skynet-src/malloc_hook.c
 @@ -9,6 +9,44 @@
@@ -39,7 +39,7 @@ index 44c7183..c29c3f6 100644
 +	}
 +}
 +
-+static const int MAX_STACK_SIZE = 32;
++static const int MAX_STACK_SIZE = 128;
 +
 +static int bt_init_status = 0;
 +
@@ -86,7 +86,7 @@ index 44c7183..c29c3f6 100644
  	uint32_t handle = skynet_current_handle();
  	size_t size = je_malloc_usable_size(ptr);
  	struct mem_cookie *p = (struct mem_cookie *)(ptr + size - sizeof(struct mem_cookie));
-@@ -94,6 +154,39 @@ fill_prefix(char* ptr) {
+@@ -94,6 +154,50 @@ fill_prefix(char* ptr) {
  #ifdef MEMORY_CHECK
  	uint32_t dogtag = MEMORY_ALLOCTAG;
  	memcpy(&p->dogtag, &dogtag, sizeof(dogtag));
@@ -97,13 +97,24 @@ index 44c7183..c29c3f6 100644
 +		void* stack_trace[MAX_STACK_SIZE];
 +		if (bt_init_status == 0) { // uninit
 +			bt_init_status = 1; // initing
-+			backtrace(stack_trace, MAX_STACK_SIZE);
++			int stack_depth = backtrace(stack_trace, MAX_STACK_SIZE);
++			if (stack_depth > 1) {
++				char** stack_strings = (char **)backtrace_symbols(stack_trace, stack_depth);
++				if (stack_strings == NULL) {
++					fprintf(stderr, "mprof: memory is not enough when dump stack trace");
++					abort();
++				}
++				for (int i = 0; i < stack_depth; i++) {
++					fprintf(stderr, "mprof: probe backtrace %dst %s\n", i, stack_strings[i]);
++				}
++				free(stack_strings);
++			}
 +			bt_init_status = 2; // init done
 +		} else if (bt_init_status == 2) {
 +			int stack_depth = backtrace(stack_trace, MAX_STACK_SIZE);
-+			if (stack_depth > 2) {
++			if (stack_depth > 1) {
 +				p->sampling = 1;
-+				stack_depth -= 2; // exclude stack_trace[0], stack_trace[1]
++				stack_depth -= 1; // exclude stack_trace[0]
 +				char* cmd = "malloc ";
 +				size_t cmdlen = strlen(cmd);
 +				size_t buf_sz = HEADER_LEN + cmdlen + sizeof(ptr) + sizeof(size) + sizeof(stack_depth) + stack_depth * sizeof(void*);
@@ -126,7 +137,7 @@ index 44c7183..c29c3f6 100644
  #endif
  	update_xmalloc_stat_alloc(handle, size);
  	return ptr;
-@@ -114,18 +207,27 @@ clean_prefix(char* ptr) {
+@@ -114,18 +218,27 @@ clean_prefix(char* ptr) {
  	assert(dogtag == MEMORY_ALLOCTAG);	// memory out of bounds
  	dogtag = MEMORY_FREETAG;
  	memcpy(&p->dogtag, &dogtag, sizeof(dogtag));
@@ -161,7 +172,7 @@ index 44c7183..c29c3f6 100644
  void
  memory_info_dump(const char* opts) {
  	je_malloc_stats_print(0,0, opts);
-@@ -185,7 +287,7 @@ void *
+@@ -185,7 +298,7 @@ void *
  skynet_malloc(size_t size) {
  	void* ptr = je_malloc(size + PREFIX_SIZE);
  	if(!ptr) malloc_oom(size);
@@ -170,7 +181,7 @@ index 44c7183..c29c3f6 100644
  }
  
  void *
-@@ -195,7 +297,7 @@ skynet_realloc(void *ptr, size_t size) {
+@@ -195,7 +308,7 @@ skynet_realloc(void *ptr, size_t size) {
  	void* rawptr = clean_prefix(ptr);
  	void *newptr = je_realloc(rawptr, size+PREFIX_SIZE);
  	if(!newptr) malloc_oom(size);
@@ -179,7 +190,7 @@ index 44c7183..c29c3f6 100644
  }
  
  void
-@@ -209,28 +311,28 @@ void *
+@@ -209,28 +322,28 @@ void *
  skynet_calloc(size_t nmemb,size_t size) {
  	void* ptr = je_calloc(nmemb + ((PREFIX_SIZE+size-1)/size), size );
  	if(!ptr) malloc_oom(size);

@@ -12,6 +12,8 @@
 #include <sys/time.h>
 #include <execinfo.h>
 #include <assert.h>
+#include <cxxabi.h>
+#include <dlfcn.h>
 
 extern "C" {
 #include "skynet.h"
@@ -22,7 +24,7 @@ extern "C" {
 extern int mprof_notify_fd; // defined in malloc_hook.c
 extern uint32_t mprof_svc_handle; // defined in malloc_hook.c
 
-static const uint8_t MAX_FUNC_NAME_SIZE = 80;
+static const uint8_t MAX_FUNC_NAME_SIZE = 255;
 
 static const int MAX_STACK_SIZE = 32;
 static const int BUCK_HASH_SIZE = 179999;

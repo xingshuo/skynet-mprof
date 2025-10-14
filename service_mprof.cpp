@@ -318,7 +318,21 @@ void mprof_app::dump_mem_records(char* filename) {
     skynet_error(m_ctx, "mprof: save %d records, %d buckets, %d nodes to <%s>", m_records_num, m_bucks_num, func_num, filename);
 }
 
+static inline void
+cxa_demangle(struct skynet_context* ctx , char* funcname, size_t len) {
+    int status;
+    char* demangled = abi::__cxa_demangle(funcname, nullptr, nullptr, &status);
+    if (status == 0) {
+        // skynet_error(ctx, "mprof: cxa_demangle symbol succ %s -> %s\n", funcname, demangled);
+        snprintf(funcname, len, "%s", demangled);
+        free(demangled);
+    }
+}
+
+
 void mprof_app::build_func_symbol_table() {
+    char funcname[MAX_FUNC_NAME_SIZE * 2];
+    char buf[MAX_FUNC_NAME_SIZE * 2];
     struct bucket* pcurr = m_bucklist;
     while (pcurr) {
         int backtrace = 0;
@@ -338,9 +352,19 @@ void mprof_app::build_func_symbol_table() {
             for (int i = 0; i < pcurr->depth; i++) {
                 void* pc = pcurr->stack[i];
                 if (m_func_Id2name.find(pc) == m_func_Id2name.end()) {
-                    std::string name = stack_strings[i];
-                    m_func_Id2name[pc] = name;
-                    m_func_name2Id[name] = pc;
+                    Dl_info info{};
+                    if (dladdr(pc, &info) && info.dli_sname) {
+                        snprintf(buf, sizeof(buf), "%s", info.dli_sname);
+                        // skynet_error(m_ctx, "mprof: pc %p to symbol %s\n", pc, buf);
+                        cxa_demangle(m_ctx, buf, sizeof(buf));
+                        snprintf(funcname, sizeof(funcname), "%p:(%s)", pc, buf);
+                    } else {
+                        snprintf(funcname, sizeof(funcname), "%s", stack_strings[i]);
+                        // skynet_error(m_ctx, "mprof: pc %p symbol failed %s\n", pc, funcname);
+                    }
+                    m_func_Id2name[pc] = funcname;
+                    m_func_name2Id[funcname] = pc;
+                    // skynet_error(m_ctx, "mprof: symbol record check %p -> %s\n", m_func_name2Id[funcname], m_func_Id2name[pc].c_str());
                 }
             }
             free(stack_strings);

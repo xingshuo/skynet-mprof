@@ -4,6 +4,6 @@ mprof
 skynet
 *.pro
 ./*.png
-*.svg
+./*.svg
 *.txt
 .vscode/

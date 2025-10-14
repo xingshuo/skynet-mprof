@@ -8,7 +8,7 @@ TARGET = mprof.so
 all: $(TARGET)
 
 $(TARGET): service_mprof.cpp
-	$(CXX) $(CFLAGS) -I$(INCLUDE_DIR) $(SHARED)  $^ -o $@
+	$(CXX) $(CFLAGS) -I$(INCLUDE_DIR) $(SHARED)  $^ -o $@ -ldl
 
 clean:
 	rm -f $(TARGET)
