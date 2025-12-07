@@ -23,6 +23,7 @@ extern "C" {
 
 extern int mprof_notify_fd; // defined in malloc_hook.c
 extern uint32_t mprof_svc_handle; // defined in malloc_hook.c
+extern int mprof_sampling_rate; // defined in malloc_hook.c
 
 static const uint8_t MAX_FUNC_NAME_SIZE = 255;
 
@@ -64,7 +65,6 @@ private:
     std::unordered_map<void*, struct bucket*> m_mem2buck;
     std::string m_recv_buf;
     struct skynet_context* m_ctx;
-    int m_mem_prof_rate;
     int m_records_num;
     int m_bucks_num;
     int m_socketId;

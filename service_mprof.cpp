@@ -6,7 +6,6 @@ mprof_app::mprof_app() {
     }
     m_ctx = NULL;
     m_recv_buf = "";
-    m_mem_prof_rate = 0; // closed
     m_records_num = 0;
     m_bucks_num = 0;
     m_bucklist = NULL;
@@ -103,17 +102,19 @@ void mprof_app::handle_cmd(const char* msg, int sz) {
     }
 
     if (memcmp(tmp, "start", cmdlen) == 0) {
-        m_mem_prof_rate = 1; // only support full sampling now
-        skynet_error(m_ctx, "mprof: open mem sampling");
+        if (cmdlen == sz) {
+            mprof_sampling_rate = 1; // full sampling
+        } else {
+            char* param = tmp + cmdlen + 1;
+            mprof_sampling_rate = strtol(param, NULL, 0);
+        }
+        skynet_error(m_ctx, "mprof: open mem sampling, rate %d(B)", mprof_sampling_rate);
     } else if (memcmp(tmp, "stop", cmdlen) == 0) {
-        m_mem_prof_rate = 0;
+        mprof_sampling_rate = 0;
         skynet_error(m_ctx, "mprof: stop mem sampling");
     } else if (memcmp(tmp, "malloc", cmdlen) == 0) {
         if (cmdlen == sz) {
             skynet_error(m_ctx, "mprof: malloc param error");
-            return;
-        }
-        if (m_mem_prof_rate == 0) {
             return;
         }
         char* param = tmp + cmdlen + 1;
